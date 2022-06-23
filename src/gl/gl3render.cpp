@@ -121,7 +121,7 @@ lightingCB(Atomic *atomic)
 	lightData.locals = locals;
 	lightData.numLocals = 8;
 
-	if(atomic->geometry->flags & rw::Geometry::LIGHT)
+	if(atomic->geometry->flags & rw::Geometry::LIGHT && engine->currentWorld)
 		((World*)engine->currentWorld)->enumerateLights(atomic, &lightData);
 	else
 		memset(&lightData, 0, sizeof(lightData));
@@ -139,7 +139,10 @@ lightingCB(void)
 	lightData.locals = locals;
 	lightData.numLocals = 8;
 
-	((World*)engine->currentWorld)->enumerateLights(&lightData);
+	if(engine->currentWorld)
+		((World*)engine->currentWorld)->enumerateLights(&lightData);
+	else
+		memset(&lightData, 0, sizeof(lightData));
 	return setLights(&lightData);
 }
 
