@@ -1398,7 +1398,12 @@ clearCamera(Camera *cam, RGBA *col, uint32 mode)
 		mask |= GL_STENCIL_BUFFER_BIT;
 	glDepthMask(GL_TRUE);
 	glClear(mask);
-	glDepthMask(rwStateCache.zwrite);
+	// Back to the mask GL had, which the state cache believes it has; the
+	// wanted one (rwStateCache.zwrite) is set at the next draw if it differs.
+	// Restoring zwrite here left GL writing depth while the cache thought it
+	// wasn't, so the next draw without depth writes (the sky) wrote depth
+	// over the screen and hid the world for a frame.
+	glDepthMask(oldGlState.depthMask);
 
 	if(setScissor)
 		glDisable(GL_SCISSOR_TEST);
@@ -1423,10 +1428,19 @@ showRaster(Raster *raster, uint32 flags)
 		SDL_GL_SetSwapInterval(0);
 	SDL_GL_SwapWindow(glGlobals.window);
 #elif defined(LIBRW_GLFW)
-	if(flags & Raster::FLIPWAITVSYNCH)
-		glfwSwapInterval(1);
-	else
-		glfwSwapInterval(0);
+	// Disable vsync when the window is not focused so glfwSwapBuffers
+	// doesn't stall waiting for a compositor that has paused presentation.
+	// This prevents the OS "Application Not Responding" dialog on alt-tab.
+	bool hasFocus = glfwGetWindowAttrib(glGlobals.window, GLFW_FOCUSED);
+	int interval = (flags & Raster::FLIPWAITVSYNCH) && hasFocus ? 1 : 0;
+	// Set only when it changes: NVIDIA's and Windows drivers keep a little
+	// memory every time the swap interval is set, which every frame for
+	// hours came to gigabytes.
+	static int lastInterval = -1;
+	if(interval != lastInterval){
+		glfwSwapInterval(interval);
+		lastInterval = interval;
+	}
 	glfwSwapBuffers(glGlobals.window);
 #else
 	not implemented
@@ -1447,10 +1461,14 @@ rasterRenderFast(Raster *raster, int32 x, int32 y)
 	case Raster::CAMERATEXTURE:
 		switch(src->type){
 		case Raster::CAMERA:
+			// CAMERA rasters store logical window dimensions, but OpenGL renders
+			// them into the physical framebuffer on high-DPI displays.
+			// Copy the pixels actually rendered by the camera.
+			Rect sourceRect = getFramebufferRect(src);
 			setActiveTexture(0);
 			glBindTexture(GL_TEXTURE_2D, natdst->texid);
-			glCopyTexSubImage2D(GL_TEXTURE_2D, 0, x, (dst->height-src->height)-y,
-				0, 0, src->width, src->height);
+			glCopyTexSubImage2D(GL_TEXTURE_2D, 0, x, (dst->height-sourceRect.h)-y,
+				sourceRect.x, sourceRect.y, sourceRect.w, sourceRect.h);
 			glBindTexture(GL_TEXTURE_2D, boundTexture[0]);
 			return 1;
 		}
@@ -1879,9 +1897,11 @@ static struct {
 	int major, minor;
 } profiles[] = {
 	{ GLFW_OPENGL_API, 3, 3 },
+#ifndef __APPLE__
 	{ GLFW_OPENGL_API, 2, 1 },
 	{ GLFW_OPENGL_ES_API, 3, 1 },
 	{ GLFW_OPENGL_ES_API, 2, 0 },
+#endif
 	{ 0, 0, 0 },
 };
 
@@ -1894,6 +1914,12 @@ startGLFW(void)
 	mode = &glGlobals.modes[glGlobals.currentMode];
 
 	glfwSetErrorCallback(glfwerr);
+#ifdef __APPLE__
+	// NSGL supports modern OpenGL only in a forward-compatible core context.
+	// https://www.glfw.org/faq.html#how-do-i-create-an-opengl-30-context
+	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+#endif
 	glfwWindowHint(GLFW_RED_BITS, mode->mode.redBits);
 	glfwWindowHint(GLFW_GREEN_BITS, mode->mode.greenBits);
 	glfwWindowHint(GLFW_BLUE_BITS, mode->mode.blueBits);

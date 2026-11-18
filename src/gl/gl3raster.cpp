@@ -509,6 +509,9 @@ assert(natras->format == GL_RGBA);
 		assert(raster->pixels == nil);
 		raster->pixels = px;
 		glReadBuffer(GL_BACK);
+		// Rows are width*3 bytes; the default pack alignment of 4 would
+		// write past the buffer when that is not a multiple of 4.
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
 		glReadPixels(0, 0, raster->width, raster->height, GL_RGB, GL_UNSIGNED_BYTE, px);
 
 		raster->privateFlags = lockMode;
