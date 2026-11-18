@@ -7,6 +7,7 @@
 namespace sk {
 
 Globals globals;
+uint32 requestedMultiSamplingLevels = 1;
 Args args;
 
 bool32 keys[KEY_NUMKEYS];
