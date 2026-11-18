@@ -741,11 +741,20 @@ readNativeTexture(Stream *stream)
 	Raster *raster;
 	D3dRaster *ext;
 
+	if(flags & 2){
+		// Haumea: cube maps aren't supported; reject the texture instead of
+		// reading through an uninitialized raster.
+		RWERROR((ERR_INVRASTER));
+		tex->destroy();
+		return nil;
+	}
 	if(flags & 8){
 		// is compressed
-		assert((flags & 2) == 0 && "Can't have cube maps yet");
 		raster = Raster::create(width, height, depth, format | type | Raster::DONTALLOCATE, PLATFORM_D3D9);
-		assert(raster);
+		if(raster == nil){
+			tex->destroy();
+			return nil;
+		}
 		ext = GETD3DRASTEREXT(raster);
 		ext->format = d3dformat;
 		ext->hasAlpha = flags & 1;
@@ -753,14 +762,21 @@ readNativeTexture(Stream *stream)
 		                             raster->format & Raster::MIPMAP ? numLevels : 1,
 		                             0,
 		                             ext->format);
-		assert(ext->texture);
+		if(ext->texture == nil){
+			raster->destroy();
+			tex->destroy();
+			return nil;
+		}
 		raster->flags &= ~Raster::DONTALLOCATE;
 		ext->customFormat = 1;
-	}else if(flags & 2){
-		assert(0 && "Can't have cube maps yet");
 	}else{
+		// Haumea: a bad raster type or format in a custom TXD makes this nil;
+		// fail the texture so the TXD is rejected instead of crashing.
 		raster = Raster::create(width, height, depth, format | type, PLATFORM_D3D9);
-		assert(raster);
+		if(raster == nil){
+			tex->destroy();
+			return nil;
+		}
 		ext = GETD3DRASTEREXT(raster);
 	}
 	tex->raster = raster;

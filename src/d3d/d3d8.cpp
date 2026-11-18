@@ -572,11 +572,20 @@ readNativeTexture(Stream *stream)
 	D3dRaster *ras;
 	if(compression){
 		raster = Raster::create(width, height, depth, format | type | Raster::DONTALLOCATE, PLATFORM_D3D8);
+		if(raster == nil){
+			tex->destroy();
+			return nil;
+		}
 		ras = GETD3DRASTEREXT(raster);
 		allocateDXT(raster, compression, numLevels, hasAlpha);
 		ras->customFormat = 1;
 	}else{
+		// Haumea: a bad raster type or format in a custom TXD makes this nil.
 		raster = Raster::create(width, height, depth, format | type, PLATFORM_D3D8);
+		if(raster == nil){
+			tex->destroy();
+			return nil;
+		}
 		ras = GETD3DRASTEREXT(raster);
 	}
 	tex->raster = raster;
