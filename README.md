@@ -1,3 +1,6 @@
+> This is [Haumea Studio](https://github.com/Haumea-Team/Haumea-Studio)'s fork of [aap/librw](https://github.com/aap/librw).
+> See [HAUMEA.md](HAUMEA.md) for what it changes and how upstream updates are taken.
+
 librw
 =====
 
