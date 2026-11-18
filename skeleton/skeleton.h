@@ -36,7 +36,24 @@ enum Key
 	KEY_LEFT  = 149,
 	KEY_RIGHT = 150,
 
-	// some stuff ommitted
+	// keypad, in the gap before KEY_BACKSP
+	KEY_PAD0        = 151,
+	KEY_PAD1        = 152,
+	KEY_PAD2        = 153,
+	KEY_PAD3        = 154,
+	KEY_PAD4        = 155,
+	KEY_PAD5        = 156,
+	KEY_PAD6        = 157,
+	KEY_PAD7        = 158,
+	KEY_PAD8        = 159,
+	KEY_PAD9        = 160,
+	KEY_PADDECIMAL  = 161,
+	KEY_PADDIVIDE   = 162,
+	KEY_PADMULTIPLY = 163,
+	KEY_PADSUBTRACT = 164,
+	KEY_PADADD      = 165,
+	KEY_PADENTER    = 166,
+	KEY_PADEQUAL    = 167,
 
 	KEY_BACKSP = 168,
 	KEY_TAB    = 169,
@@ -75,7 +92,8 @@ enum Event
 	MOUSEWHEEL,
 	RESIZE,
 	IDLE,
-	QUIT
+	QUIT,
+	FILEDROP
 };
 
 struct Globals

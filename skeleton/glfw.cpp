@@ -110,23 +110,23 @@ initkeymap(void)
 	keymap[GLFW_KEY_F23] = KEY_NULL;
 	keymap[GLFW_KEY_F24] = KEY_NULL;
 	keymap[GLFW_KEY_F25] = KEY_NULL;
-	keymap[GLFW_KEY_KP_0] = KEY_NULL;
-	keymap[GLFW_KEY_KP_1] = KEY_NULL;
-	keymap[GLFW_KEY_KP_2] = KEY_NULL;
-	keymap[GLFW_KEY_KP_3] = KEY_NULL;
-	keymap[GLFW_KEY_KP_4] = KEY_NULL;
-	keymap[GLFW_KEY_KP_5] = KEY_NULL;
-	keymap[GLFW_KEY_KP_6] = KEY_NULL;
-	keymap[GLFW_KEY_KP_7] = KEY_NULL;
-	keymap[GLFW_KEY_KP_8] = KEY_NULL;
-	keymap[GLFW_KEY_KP_9] = KEY_NULL;
-	keymap[GLFW_KEY_KP_DECIMAL] = KEY_NULL;
-	keymap[GLFW_KEY_KP_DIVIDE] = KEY_NULL;
-	keymap[GLFW_KEY_KP_MULTIPLY] = KEY_NULL;
-	keymap[GLFW_KEY_KP_SUBTRACT] = KEY_NULL;
-	keymap[GLFW_KEY_KP_ADD] = KEY_NULL;
-	keymap[GLFW_KEY_KP_ENTER] = KEY_NULL;
-	keymap[GLFW_KEY_KP_EQUAL] = KEY_NULL;
+	keymap[GLFW_KEY_KP_0] = KEY_PAD0;
+	keymap[GLFW_KEY_KP_1] = KEY_PAD1;
+	keymap[GLFW_KEY_KP_2] = KEY_PAD2;
+	keymap[GLFW_KEY_KP_3] = KEY_PAD3;
+	keymap[GLFW_KEY_KP_4] = KEY_PAD4;
+	keymap[GLFW_KEY_KP_5] = KEY_PAD5;
+	keymap[GLFW_KEY_KP_6] = KEY_PAD6;
+	keymap[GLFW_KEY_KP_7] = KEY_PAD7;
+	keymap[GLFW_KEY_KP_8] = KEY_PAD8;
+	keymap[GLFW_KEY_KP_9] = KEY_PAD9;
+	keymap[GLFW_KEY_KP_DECIMAL] = KEY_PADDECIMAL;
+	keymap[GLFW_KEY_KP_DIVIDE] = KEY_PADDIVIDE;
+	keymap[GLFW_KEY_KP_MULTIPLY] = KEY_PADMULTIPLY;
+	keymap[GLFW_KEY_KP_SUBTRACT] = KEY_PADSUBTRACT;
+	keymap[GLFW_KEY_KP_ADD] = KEY_PADADD;
+	keymap[GLFW_KEY_KP_ENTER] = KEY_PADENTER;
+	keymap[GLFW_KEY_KP_EQUAL] = KEY_PADEQUAL;
 	keymap[GLFW_KEY_LEFT_SHIFT] = KEY_LSHIFT;
 	keymap[GLFW_KEY_LEFT_CONTROL] = KEY_LCTRL;
 	keymap[GLFW_KEY_LEFT_ALT] = KEY_LALT;
@@ -216,6 +216,13 @@ mousewheel(GLFWwindow *window, double x, double y)
 	EventHandler(MOUSEWHEEL, &ms);
 }
 
+static void
+filedrop(GLFWwindow *window, int count, const char **paths)
+{
+	for(int i = 0; i < count; i++)
+		EventHandler(FILEDROP, (void*)paths[i]);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -231,7 +238,7 @@ main(int argc, char *argv[])
 	engineOpenParams.window = &window;
 
 	if(EventHandler(RWINITIALIZE, nil) == EVENTERROR)
-		return 0;
+		return 1;
 
 	initkeymap();
 	glfwSetKeyCallback(window, keypress);
@@ -240,9 +247,38 @@ main(int argc, char *argv[])
 	glfwSetCursorPosCallback(window, mousemove);
 	glfwSetMouseButtonCallback(window, mousebtn);
 	glfwSetScrollCallback(window, mousewheel);
+	glfwSetDropCallback(window, filedrop);
+
+	// GLFW does not replay the initial window size through the callback. The
+	// window manager may clamp the requested size to the available work area,
+	// so synchronize the app's camera/UI dimensions with the real client size.
+	int windowWidth, windowHeight;
+	glfwGetWindowSize(window, &windowWidth, &windowHeight);
+	if(windowWidth > 0 && windowHeight > 0 &&
+	   (windowWidth != sk::globals.width || windowHeight != sk::globals.height))
+		resize(window, windowWidth, windowHeight);
 
 	float lastTime = glfwGetTime()*1000;
 	while(!sk::globals.quit && !glfwWindowShouldClose(window)){
+		// When iconified (minimized), yield the thread and skip rendering
+		// to avoid blocking on glfwSwapBuffers with vsync enabled, which
+		// triggers the OS "Application Not Responding" dialog.
+		if(glfwGetWindowAttrib(window, GLFW_ICONIFIED)){
+			glfwWaitEventsTimeout(0.05);
+			lastTime = glfwGetTime()*1000;
+			continue;
+		}
+
+		// Unfocused, vsync is off (see showRaster): about 30 frames a second
+		// instead of as many as the GPU can draw.
+		static double frameStart;
+		if(!glfwGetWindowAttrib(window, GLFW_FOCUSED)){
+			double wait = 1.0/30.0 - (glfwGetTime() - frameStart);
+			if(wait > 0.0)
+				glfwWaitEventsTimeout(wait);
+		}
+		frameStart = glfwGetTime();
+
 		float currTime  = glfwGetTime()*1000;
 		float timeDelta = (currTime - lastTime)*0.001f;
 		glfwPollEvents();

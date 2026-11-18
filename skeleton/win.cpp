@@ -29,6 +29,7 @@ initkeymap(void)
 		keymap[i] = i;
 	keymap[VK_OEM_1] = ';';
 	keymap[VK_OEM_NEC_EQUAL] = '=';
+	keymap[VK_OEM_PLUS] = '=';	// the =/+ key; VK_OEM_NEC_EQUAL is only NEC's keypad =
 	for(i = 'A'; i <= 'Z'; i++)
 		keymap[i] = i;
 	keymap[VK_OEM_4] = '[';
