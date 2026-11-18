@@ -308,7 +308,8 @@ Engine::start(void)
 		return 0;
 	}
 
-	engine->device.system(DEVICEINIT, nil, 0);
+	if(!engine->device.system(DEVICEINIT, nil, 0))
+		return 0;
 
 	Engine::s_plglist.construct(engine);
 	for(uint i = 0; i < NUM_PLATFORMS; i++)
