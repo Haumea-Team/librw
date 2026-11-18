@@ -20,7 +20,10 @@ SetClip(const ImVec4 &clip)
 	float x1 = clip.x; float y1 = clip.y;
 	float x2 = clip.z; float y2 = clip.w;
 #ifdef RW_OPENGL
-	glScissor(x1, io.DisplaySize.y-y2, x2-x1, y2-y1);
+	const float scaleX = io.DisplayFramebufferScale.x;
+	const float scaleY = io.DisplayFramebufferScale.y;
+	glScissor(x1*scaleX, (io.DisplaySize.y-y2)*scaleY,
+	           (x2-x1)*scaleX, (y2-y1)*scaleY);
 	glEnable(GL_SCISSOR_TEST);
 #endif
 #ifdef RW_D3D9
@@ -73,6 +76,9 @@ ImGui_ImplRW_RenderDrawLists(ImDrawData* draw_data)
 		const ImDrawList *cmd_list = draw_data->CmdLists[n];
 		const ImDrawVert *vtx_src = cmd_list->VtxBuffer.Data;
 		for(int i = 0; i < cmd_list->VtxBuffer.Size; i++){
+			// librw's im2d transform maps logical UI positions through the camera
+			// raster and OpenGL viewport, so applying framebuffer scale here again
+			// would zoom the UI and desync it from logical mouse coordinates.
 			vtx_dst[i].setScreenX(vtx_src[i].pos.x + xoff);
 			vtx_dst[i].setScreenY(vtx_src[i].pos.y + yoff);
 			vtx_dst[i].setScreenZ(rw::im2d::GetNearZ());
@@ -104,7 +110,6 @@ ImGui_ImplRW_RenderDrawLists(ImDrawData* draw_data)
 	int vtx_offset = 0;
 	for(int n = 0; n < draw_data->CmdListsCount; n++){
 		const ImDrawList *cmd_list = draw_data->CmdLists[n];
-		int idx_offset = 0;
 		for(int i = 0; i < cmd_list->CmdBuffer.Size; i++){
 			const ImDrawCmd *pcmd = &cmd_list->CmdBuffer[i];
 			if(pcmd->UserCallback)
@@ -121,11 +126,11 @@ ImGui_ImplRW_RenderDrawLists(ImDrawData* draw_data)
 
 				SetClip(pcmd->ClipRect);
 				rw::im2d::RenderIndexedPrimitive(rw::PRIMTYPETRILIST,
-					g_vertbuf+vtx_offset, cmd_list->VtxBuffer.Size,
-					cmd_list->IdxBuffer.Data+idx_offset, pcmd->ElemCount);
+					g_vertbuf+vtx_offset+pcmd->VtxOffset,
+					cmd_list->VtxBuffer.Size-pcmd->VtxOffset,
+					cmd_list->IdxBuffer.Data+pcmd->IdxOffset, pcmd->ElemCount);
 				DisableClip();
 			}
-			idx_offset += pcmd->ElemCount;
 		}
 		vtx_offset += cmd_list->VtxBuffer.Size;
 	}
@@ -148,6 +153,23 @@ ImGui_ImplRW_Init(void)
 
 	ImGui::CreateContext();
 	ImGuiIO &io = ImGui::GetIO();
+	io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+
+#ifdef LIBRW_GLFW
+	// Wire up GLFW clipboard so Ctrl+C/V works in ImGui text fields.
+	// Use the current ImGui 1.91+ Platform API directly instead of the
+	// deprecated io.GetClipboardTextFn shim.
+	ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
+	pio.Platform_GetClipboardTextFn = [](ImGuiContext*) -> const char* {
+		GLFWwindow *win = *engineOpenParams.window;
+		if(win) return glfwGetClipboardString(win);
+		return "";
+	};
+	pio.Platform_SetClipboardTextFn = [](ImGuiContext*, const char *text) {
+		GLFWwindow *win = *engineOpenParams.window;
+		if(win) glfwSetClipboardString(win, text);
+	};
+#endif
 
 	return true;
 }
@@ -198,12 +220,23 @@ ImGui_ImplRW_NewFrame(float timeDelta)
 	ImGuiIO &io = ImGui::GetIO();
 
 	io.DisplaySize = ImVec2(sk::globals.width, sk::globals.height);
+	io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+#if defined(RW_OPENGL) && defined(LIBRW_GLFW)
+	// GLFW reports window dimensions in logical coordinates, while OpenGL
+	// renders to the potentially larger high-DPI framebuffer.
+	if(engineOpenParams.window && *engineOpenParams.window){
+		int framebufferWidth, framebufferHeight;
+		glfwGetFramebufferSize(*engineOpenParams.window,
+		                       &framebufferWidth, &framebufferHeight);
+		if(framebufferWidth > 0 && framebufferHeight > 0 &&
+		   io.DisplaySize.x > 0.0f && io.DisplaySize.y > 0.0f)
+			io.DisplayFramebufferScale = ImVec2(
+				(float)framebufferWidth/io.DisplaySize.x,
+				(float)framebufferHeight/io.DisplaySize.y);
+	}
+#endif
 	io.DeltaTime = timeDelta;
 
-	io.KeyCtrl = ImGui::IsKeyPressed(ImGuiKey_LeftCtrl) || ImGui::IsKeyPressed(ImGuiKey_RightCtrl);
-	io.KeyShift = ImGui::IsKeyPressed(ImGuiKey_LeftShift) || ImGui::IsKeyPressed(ImGuiKey_RightShift);
-	io.KeyAlt = ImGui::IsKeyPressed(ImGuiKey_LeftAlt) || ImGui::IsKeyPressed(ImGuiKey_RightAlt);
-	io.KeySuper = false;
 
 	if(io.WantSetMousePos)
 		sk::SetMousePosition(io.MousePos.x, io.MousePos.y);
@@ -216,6 +249,7 @@ static ImGuiKey SkKeyToImGuiKey(int keycode)
     switch (keycode) {
         case ' ': return ImGuiKey_Space;
         case '\'': return ImGuiKey_Apostrophe;
+        case ',': return ImGuiKey_Comma;
         case '-': return ImGuiKey_Minus;
         case '.': return ImGuiKey_Period;
         case '/': return ImGuiKey_Slash;
@@ -300,6 +334,24 @@ static ImGuiKey SkKeyToImGuiKey(int keycode)
         case sk::KEY_RCTRL: return ImGuiKey_RightCtrl;
         case sk::KEY_RALT: return ImGuiKey_RightAlt;
 
+        case sk::KEY_PAD0: return ImGuiKey_Keypad0;
+        case sk::KEY_PAD1: return ImGuiKey_Keypad1;
+        case sk::KEY_PAD2: return ImGuiKey_Keypad2;
+        case sk::KEY_PAD3: return ImGuiKey_Keypad3;
+        case sk::KEY_PAD4: return ImGuiKey_Keypad4;
+        case sk::KEY_PAD5: return ImGuiKey_Keypad5;
+        case sk::KEY_PAD6: return ImGuiKey_Keypad6;
+        case sk::KEY_PAD7: return ImGuiKey_Keypad7;
+        case sk::KEY_PAD8: return ImGuiKey_Keypad8;
+        case sk::KEY_PAD9: return ImGuiKey_Keypad9;
+        case sk::KEY_PADDECIMAL: return ImGuiKey_KeypadDecimal;
+        case sk::KEY_PADDIVIDE: return ImGuiKey_KeypadDivide;
+        case sk::KEY_PADMULTIPLY: return ImGuiKey_KeypadMultiply;
+        case sk::KEY_PADSUBTRACT: return ImGuiKey_KeypadSubtract;
+        case sk::KEY_PADADD: return ImGuiKey_KeypadAdd;
+        case sk::KEY_PADENTER: return ImGuiKey_KeypadEnter;
+        case sk::KEY_PADEQUAL: return ImGuiKey_KeypadEqual;
+
         case sk::KEY_NULL: return ImGuiKey_None;
     }
     return ImGuiKey_None;
@@ -316,11 +368,26 @@ ImGuiEventHandler(sk::Event e, void *param)
 
 	switch(e){
 	case KEYDOWN:
-		io.AddKeyEvent(SkKeyToImGuiKey(*(int*)param), true);
+	case KEYUP: {
+		// ImGui reads Ctrl/Shift/Alt only from the ImGuiMod_ keys, so text
+		// fields need them for Ctrl+V, Ctrl+C, Ctrl+A and Ctrl+Z.
+		static bool modDown[6];
+		int key = *(int*)param;
+		bool down = e == KEYDOWN;
+		io.AddKeyEvent(SkKeyToImGuiKey(key), down);
+		switch(key){
+		case KEY_LCTRL: modDown[0] = down; break;
+		case KEY_RCTRL: modDown[1] = down; break;
+		case KEY_LSHIFT: modDown[2] = down; break;
+		case KEY_RSHIFT: modDown[3] = down; break;
+		case KEY_LALT: modDown[4] = down; break;
+		case KEY_RALT: modDown[5] = down; break;
+		}
+		io.AddKeyEvent(ImGuiMod_Ctrl, modDown[0] || modDown[1]);
+		io.AddKeyEvent(ImGuiMod_Shift, modDown[2] || modDown[3]);
+		io.AddKeyEvent(ImGuiMod_Alt, modDown[4] || modDown[5]);
 		return EVENTPROCESSED;
-	case KEYUP:
-		io.AddKeyEvent(SkKeyToImGuiKey(*(int*)param), false);
-		return EVENTPROCESSED;
+	}
 	case CHARINPUT:
 		c = (uint)(uintptr)param;
 		io.AddInputCharacter((unsigned short)c);
