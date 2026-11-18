@@ -34,6 +34,10 @@ extern Device renderdevice;
 #ifdef RW_D3D9
 #ifdef _D3D9_H_
 extern IDirect3DDevice9 *d3ddevice;
+// Called before the device is reset (resize, vsync change, lost device), so
+// an application can release its own D3DPOOL_DEFAULT resources (Haumea's
+// ImGui backend).
+extern void (*releaseDeviceResources)(void);
 void setD3dMaterial(D3DMATERIAL9 *mat9);
 #endif
 

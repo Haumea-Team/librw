@@ -1176,9 +1176,13 @@ recreateDynamicIBs(void)
 	}
 }
 
+void (*releaseDeviceResources)(void);
+
 static void
 releaseVideoMemory(void)
 {
+	if(releaseDeviceResources)
+		releaseDeviceResources();
 	int32 i;
 	for(i = 0; i < MAXNUMSTAGES; i++)
 		d3ddevice->SetTexture(i, nil);
