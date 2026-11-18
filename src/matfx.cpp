@@ -440,7 +440,13 @@ readMaterialMatFX(Stream *stream, int32, void *object, int32 offset, int32)
 				tex = Texture::streamRead(stream);
 			}
 			idx = matfx->getEffectIndex(type);
-			assert(idx >= 0);
+			if(idx < 0){
+				// Haumea: an effect the material's type doesn't have
+				// (a bad custom DFF); skip it instead of writing fx[-1].
+				if(bumpedTex) bumpedTex->destroy();
+				if(tex) tex->destroy();
+				break;
+			}
 			matfx->fx[idx].bump.bumpedTex = bumpedTex;
 			matfx->fx[idx].bump.tex = tex;
 			matfx->fx[idx].bump.coefficient = coefficient;
@@ -459,7 +465,10 @@ readMaterialMatFX(Stream *stream, int32, void *object, int32 offset, int32)
 				tex = Texture::streamRead(stream);
 			}
 			idx = matfx->getEffectIndex(type);
-			assert(idx >= 0);
+			if(idx < 0){
+				if(tex) tex->destroy();
+				break;
+			}
 			matfx->fx[idx].env.tex = tex;
 			matfx->fx[idx].env.fbAlpha = fbAlpha;
 			matfx->fx[idx].env.coefficient = coefficient;
@@ -478,7 +487,10 @@ readMaterialMatFX(Stream *stream, int32, void *object, int32 offset, int32)
 				tex = Texture::streamRead(stream);
 			}
 			idx = matfx->getEffectIndex(type);
-			assert(idx >= 0);
+			if(idx < 0){
+				if(tex) tex->destroy();
+				break;
+			}
 			matfx->fx[idx].dual.tex = tex;
 			matfx->fx[idx].dual.srcBlend = srcBlend;
 			matfx->fx[idx].dual.dstBlend = dstBlend;
