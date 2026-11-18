@@ -60,6 +60,9 @@ workspace "librw"
 		if _OPTIONS["gfxlib"] == "sdl2" then
 			includedirs { "/usr/include/SDL2" }
 		end
+	filter { "system:macosx" }
+		platforms { "macos-amd64-null", "macos-amd64-gl3",
+			"macos-arm64-null", "macos-arm64-gl3" }
 	filter {}
 
 	filter "configurations:Debug"
@@ -121,11 +124,17 @@ export FREESCE_GCC
 		architecture "x86"
 	filter { "platforms:*arm*" }
 		architecture "ARM"
+	filter { "platforms:*arm64*" }
+		architecture "ARM64"
 
 	filter { "platforms:win*" }
 		system "windows"
 	filter { "platforms:linux*" }
 		system "linux"
+	filter { "platforms:macos*" }
+		system "macosx"
+	filter { "platforms:macos*gl3" }
+		includedirs { "/opt/homebrew/include", "/usr/local/include" }
 
 	filter { "platforms:win*gl3" }
 		includedirs { path.join(_OPTIONS["sdl2dir"], "include") }
