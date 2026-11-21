@@ -89,11 +89,16 @@ void*
 createIndexBuffer(uint32 length, bool dynamic)
 {
 #ifdef RW_D3D9
-	IDirect3DIndexBuffer9 *ibuf;
+	// Haumea: a failed create (a lost device, no video memory) leaves the
+	// out pointer as it was, so it starts nil and failure returns nil.
+	IDirect3DIndexBuffer9 *ibuf = nil;
+	HRESULT res;
 	if(dynamic)
-		d3ddevice->CreateIndexBuffer(length, D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ibuf, 0);
+		res = d3ddevice->CreateIndexBuffer(length, D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ibuf, 0);
 	else
-		d3ddevice->CreateIndexBuffer(length, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, &ibuf, 0);
+		res = d3ddevice->CreateIndexBuffer(length, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, &ibuf, 0);
+	if(FAILED(res))
+		ibuf = nil;
 	if(ibuf)
 		d3d9Globals.numIndexBuffers++;
 	return ibuf;
@@ -122,9 +127,10 @@ lockIndices(void *indexBuffer, uint32 offset, uint32 size, uint32 flags)
 	if(indexBuffer == nil)
 		return nil;
 #ifdef RW_D3D9
-	uint16 *indices;
+	uint16 *indices = nil;
 	IDirect3DIndexBuffer9 *ibuf = (IDirect3DIndexBuffer9*)indexBuffer;
-	ibuf->Lock(offset, size, (void**)&indices, flags);
+	if(FAILED(ibuf->Lock(offset, size, (void**)&indices, flags)))
+		return nil;
 	return indices;
 #else
 	(void)offset;
@@ -149,11 +155,14 @@ void*
 createVertexBuffer(uint32 length, uint32 fvf, bool dynamic)
 {
 #ifdef RW_D3D9
-	IDirect3DVertexBuffer9 *vbuf;
+	IDirect3DVertexBuffer9 *vbuf = nil;	// Haumea: as in createIndexBuffer
+	HRESULT res;
 	if(dynamic)
-		d3ddevice->CreateVertexBuffer(length, D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, fvf, D3DPOOL_DEFAULT, &vbuf, 0);
+		res = d3ddevice->CreateVertexBuffer(length, D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, fvf, D3DPOOL_DEFAULT, &vbuf, 0);
 	else
-		d3ddevice->CreateVertexBuffer(length, D3DUSAGE_WRITEONLY, fvf, D3DPOOL_MANAGED, &vbuf, 0);
+		res = d3ddevice->CreateVertexBuffer(length, D3DUSAGE_WRITEONLY, fvf, D3DPOOL_MANAGED, &vbuf, 0);
+	if(FAILED(res))
+		vbuf = nil;
 	if(vbuf)
 		d3d9Globals.numVertexBuffers++;
 	return vbuf;
@@ -183,9 +192,10 @@ lockVertices(void *vertexBuffer, uint32 offset, uint32 size, uint32 flags)
 	if(vertexBuffer == nil)
 		return nil;
 #ifdef RW_D3D9
-	uint8 *verts;
+	uint8 *verts = nil;
 	IDirect3DVertexBuffer9 *vertbuf = (IDirect3DVertexBuffer9*)vertexBuffer;
-	vertbuf->Lock(offset, size, (void**)&verts, flags);
+	if(FAILED(vertbuf->Lock(offset, size, (void**)&verts, flags)))
+		return nil;
 	return verts;
 #else
 	(void)offset;
@@ -210,9 +220,10 @@ void*
 createTexture(int32 width, int32 height, int32 numlevels, uint32 usage, uint32 format)
 {
 #ifdef RW_D3D9
-	IDirect3DTexture9 *tex;
-	d3ddevice->CreateTexture(width, height, numlevels, usage,
-	                      (D3DFORMAT)format, D3DPOOL_MANAGED, &tex, nil);
+	IDirect3DTexture9 *tex = nil;	// Haumea: as in createIndexBuffer
+	if(FAILED(d3ddevice->CreateTexture(width, height, numlevels, usage,
+	                      (D3DFORMAT)format, D3DPOOL_MANAGED, &tex, nil)))
+		tex = nil;
 	if(tex)
 		d3d9Globals.numTextures++;
 	return tex;
@@ -835,6 +846,35 @@ fprintf(stderr, "%d %x\n", image->depth, format); fflush(stdout);
 	return 1;
 }
 
+// D3DFMT_R5G6B5, little endian
+static void
+conv_RGBA8888_from_RGB565(uint8 *out, uint8 *in)
+{
+	uint32 px = in[0] | in[1]<<8;
+	out[0] = ((px>>11) & 0x1F)*0xFF/0x1F;
+	out[1] = ((px>>5) & 0x3F)*0xFF/0x3F;
+	out[2] = (px & 0x1F)*0xFF/0x1F;
+	out[3] = 0xFF;
+}
+
+// D3DFMT_A4R4G4B4, little endian
+static void
+conv_RGBA8888_from_ARGB4444(uint8 *out, uint8 *in)
+{
+	out[0] = (in[1] & 0xF)*0x11;
+	out[1] = (in[0]>>4)*0x11;
+	out[2] = (in[0] & 0xF)*0x11;
+	out[3] = (in[1]>>4)*0x11;
+}
+
+// D3DFMT_L8
+static void
+conv_RGBA8888_from_LUM8(uint8 *out, uint8 *in)
+{
+	out[0] = out[1] = out[2] = in[0];
+	out[3] = 0xFF;
+}
+
 Image*
 rasterToImage(Raster *raster)
 {
@@ -902,13 +942,35 @@ rasterToImage(Raster *raster)
 		depth = 16;
 		conv = conv_ARGB1555_from_RGB555;
 		break;
+	// No image format of their own: they become RGBA8888. (Custom TXDs
+	// often keep glass and decals as A4R4G4B4.)
+	case Raster::C565:
+		depth = 32;
+		conv = conv_RGBA8888_from_RGB565;
+		break;
+	case Raster::C4444:
+		depth = 32;
+		conv = conv_RGBA8888_from_ARGB4444;
+		break;
+	case Raster::LUM8:
+		depth = 32;
+		conv = conv_RGBA8888_from_LUM8;
+		break;
 
 	default:
-	case Raster::C565:
-	case Raster::C4444:
-	case Raster::LUM8:
 		RWERROR((ERR_INVRASTER));
+		if(unlock)
+			raster->unlock(0);
 		return nil;
+	}
+	if((raster->format & 0xF00) == Raster::C565 || (raster->format & 0xF00) == Raster::C4444 ||
+	   (raster->format & 0xF00) == Raster::LUM8){
+		if(raster->format & (Raster::PAL4 | Raster::PAL8)){
+			RWERROR((ERR_INVRASTER));
+			if(unlock)
+				raster->unlock(0);
+			return nil;
+		}
 	}
 	int32 pallength = 0;
 	if((raster->format & Raster::PAL4) == Raster::PAL4){

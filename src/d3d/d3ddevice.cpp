@@ -1222,6 +1222,39 @@ restoreVideoMemory(void)
 	restoreD3d9Device();
 }
 
+// Haumea: Reset can fail (the device is lost again: the screen locked, a
+// UAC prompt, a driver reset). Video memory then stays released, with the
+// dynamic buffers nil and the default surfaces gone, until a Reset works:
+// recreating things on a device that wasn't reset made the buffers garbage
+// (a crash in the next im3d lock), and the camera would set freed surfaces.
+static bool videoMemoryReleased;
+
+static bool
+resetDevice(void)
+{
+	if(!videoMemoryReleased){
+		releaseVideoMemory();
+		videoMemoryReleased = true;
+	}
+	if(FAILED(d3d::d3ddevice->Reset(&d3d9Globals.present)))
+		return false;
+	restoreVideoMemory();
+	videoMemoryReleased = false;
+	return true;
+}
+
+// True when the device can be drawn to; tries the Reset again once the
+// device says it can be.
+static bool
+deviceReady(void)
+{
+	if(!videoMemoryReleased)
+		return true;
+	if(d3ddevice->TestCooperativeLevel() == D3DERR_DEVICELOST)
+		return false;	// still lost: try again next frame
+	return resetDevice();
+}
+
 static void
 beginUpdate(Camera *cam)
 {
@@ -1308,10 +1341,10 @@ beginUpdate(Camera *cam)
 		d3d9Globals.present.BackBufferWidth = r.right;
 		d3d9Globals.present.BackBufferHeight = r.bottom;
 
-		releaseVideoMemory();
-		d3d::d3ddevice->Reset(&d3d9Globals.present);
-		restoreVideoMemory();
+		resetDevice();
 	}
+	if(!deviceReady())
+		return;	// nothing is drawn this frame
 
 	setRenderSurfaces(cam);
 
@@ -1338,6 +1371,8 @@ clearCamera(Camera *cam, RGBA *col, uint32 mode)
 		mode |= D3DCLEAR_STENCIL;
 	D3DCOLOR c = D3DCOLOR_RGBA(col->red, col->green, col->blue, col->alpha);
 
+	if(videoMemoryReleased)
+		return;
 	setRenderSurfaces(cam);
 
 	setViewport(cam->frameBuffer);	// need to set this for the clear to work correctly
@@ -1350,10 +1385,10 @@ showRaster(Raster *raster, uint32 flag)
 	UINT interval = flag & Raster::FLIPWAITVSYNCH ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE;
 	if(d3d9Globals.present.PresentationInterval != interval){
 		d3d9Globals.present.PresentationInterval = interval;
-		releaseVideoMemory();
-		d3d::d3ddevice->Reset(&d3d9Globals.present);
-		restoreVideoMemory();
+		resetDevice();
 	}
+	if(!deviceReady())
+		return;
 
 	// not used but we want cameras to have rasters
 	assert(raster);
@@ -1362,11 +1397,8 @@ showRaster(Raster *raster, uint32 flag)
 	if(res == D3DERR_DEVICELOST){
 		res = d3ddevice->TestCooperativeLevel();
 		// lost while being minimized, not reset once we're back
-		if(res == D3DERR_DEVICENOTRESET){
-			releaseVideoMemory();
-			d3d::d3ddevice->Reset(&d3d9Globals.present);
-			restoreVideoMemory();
-		}
+		if(res == D3DERR_DEVICENOTRESET)
+			resetDevice();
 	}
 }
 
@@ -1898,7 +1930,9 @@ termD3D(void)
 	closeIm3D();
 	closeIm2D();
 
-	releaseVideoMemory();
+	if(!videoMemoryReleased)
+		releaseVideoMemory();
+	videoMemoryReleased = false;
 
 	ULONG ref = d3d::d3ddevice->Release();
 	if(ref != 0)

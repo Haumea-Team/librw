@@ -122,7 +122,11 @@ im2DRenderPrimitive(PrimitiveType primType, void *vertices, int32 numVertices)
 		// TODO: error
 		return;
 	}
+	// Haumea: while the device is being reset the dynamic buffers are gone
+	// (nil) and nothing is drawn.
 	uint8 *lockedvertices = lockVertices(im2dvertbuf, 0, numVertices*sizeof(Im2DVertex), D3DLOCK_DISCARD);
+	if(lockedvertices == nil)
+		return;
 	memcpy(lockedvertices, vertices, numVertices*sizeof(Im2DVertex));
 	unlockVertices(im2dvertbuf);
 
@@ -175,10 +179,14 @@ im2DRenderIndexedPrimitive(PrimitiveType primType,
 		return;
 	}
 	uint16 *lockedindices = lockIndices(im2dindbuf, 0, numIndices*sizeof(uint16), D3DLOCK_DISCARD);
+	if(lockedindices == nil)
+		return;
 	memcpy(lockedindices, indices, numIndices*sizeof(uint16));
 	unlockIndices(im2dindbuf);
 
 	uint8 *lockedvertices = lockVertices(im2dvertbuf, 0, numVertices*sizeof(Im2DVertex), D3DLOCK_DISCARD);
+	if(lockedvertices == nil)
+		return;
 	memcpy(lockedvertices, vertices, numVertices*sizeof(Im2DVertex));
 	unlockVertices(im2dvertbuf);
 
@@ -306,7 +314,13 @@ im3DTransform(void *vertices, int32 numVertices, Matrix *world, uint32 flags)
 		setMaterial(white, surfprops);
 	}
 
+	// Haumea: nothing to draw into while the device is being reset; the
+	// render calls see no vertices and draw nothing.
 	uint8 *lockedvertices = lockVertices(im3dvertbuf, 0, numVertices*sizeof(Im3DVertex), D3DLOCK_DISCARD);
+	if(lockedvertices == nil){
+		num3DVertices = 0;
+		return;
+	}
 	memcpy(lockedvertices, vertices, numVertices*sizeof(Im3DVertex));
 	unlockVertices(im3dvertbuf);
 
@@ -321,6 +335,8 @@ im3DTransform(void *vertices, int32 numVertices, Matrix *world, uint32 flags)
 void
 im3DRenderPrimitive(PrimitiveType primType)
 {
+	if(num3DVertices == 0)
+		return;
 	if(engine->device.getRenderState(TEXTURERASTER))
 		setPixelShader(default_tex_PS);
 	else
@@ -355,7 +371,11 @@ im3DRenderPrimitive(PrimitiveType primType)
 void
 im3DRenderIndexedPrimitive(PrimitiveType primType, void *indices, int32 numIndices)
 {
+	if(num3DVertices == 0)
+		return;
 	uint16 *lockedindices = lockIndices(im3dindbuf, 0, numIndices*sizeof(uint16), D3DLOCK_DISCARD);
+	if(lockedindices == nil)
+		return;
 	memcpy(lockedindices, indices, numIndices*sizeof(uint16));
 	unlockIndices(im3dindbuf);
 
